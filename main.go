@@ -21,9 +21,9 @@ func main() {
 	conf := apiConfig{}
 
 	// register handler
-	serverMux.HandleFunc("GET /healthz", serverHealth)
-	serverMux.HandleFunc("GET /metrics", conf.numRequests)
-	serverMux.HandleFunc("POST /reset", conf.resetHits)
+	serverMux.HandleFunc("GET /api/healthz", serverHealth)
+	serverMux.HandleFunc("GET /api/metrics", conf.numRequests)
+	serverMux.HandleFunc("POST /api/reset", conf.resetHits)
 
 	// fileserver
 	handler := http.FileServer(http.Dir("."))
