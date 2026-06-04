@@ -1,21 +1,42 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
-	"strings"
 	"slices"
+	"strings"
+	"sync/atomic"
+	"time"
+	"context"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+
+	"github.com/Gosewinckel/Chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileServerHits atomic.Int32
+	dbQueries database.Queries
+	platform string
 }
 
 func main() {
+	// load .env
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		os.Exit(1)
+	}
+	dbQueries := database.New(db)
+
 	// create and start server
 	serverMux := http.NewServeMux()
 	server := &http.Server{
@@ -23,18 +44,21 @@ func main() {
 		Handler: 	serverMux,
 	}
 	conf := apiConfig{}
+	conf.dbQueries = *dbQueries
+	conf.platform = platform
 
 	// register handlers
 	serverMux.HandleFunc("GET /api/healthz", serverHealth)
 	serverMux.HandleFunc("GET /admin/metrics", conf.numRequests)
 	serverMux.HandleFunc("POST /admin/reset", conf.resetHits)
 	serverMux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	serverMux.HandleFunc("POST /api/users", conf.createUser)
 
 	// fileserver
 	handler := http.FileServer(http.Dir("."))
 	serverMux.Handle("/app/", conf.middlewareMetricsInc(http.StripPrefix("/app", handler)))
 
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		os.Exit(1)
 	}
@@ -69,7 +93,12 @@ func (conf *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (conf *apiConfig) resetHits(w  http.ResponseWriter, r *http.Request) {
+	if conf.platform != "dev" {
+		w.WriteHeader(403)
+		return
+	}
 	conf.fileServerHits.Store(0)
+	conf.dbQueries.ClearUsers(context.Background())
 }
 
 func validateChirp(w http.ResponseWriter, r *http.Request) {
@@ -140,3 +169,43 @@ func cleanOutput(s string) string {
 	out := strings.Join(words, " ")
 	return out
 }
+
+func (conf *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}	
+	type returnVals struct {
+		ID 			uuid.UUID 	`json:"id"`	
+		CreatedAt 	time.Time 	`json:"created_at"`
+		UpdatedAt	time.Time 	`json:"updated_at"`
+		Email 		string 		`json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding request body")
+		w.WriteHeader(500)
+		return
+	}
+
+	user, err := conf.dbQueries.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		log.Printf("Error creating user")
+		w.WriteHeader(500)
+		return
+	}
+	
+	payload := returnVals{user.ID, user.CreatedAt, user.UpdatedAt, user.Email}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshaling payload")
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(data)
+}
+
