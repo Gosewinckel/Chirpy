@@ -53,6 +53,9 @@ func main() {
 	serverMux.HandleFunc("POST /admin/reset", conf.resetHits)
 	serverMux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	serverMux.HandleFunc("POST /api/users", conf.createUser)
+	serverMux.HandleFunc("POST /api/chirps", conf.createChirp)
+	serverMux.HandleFunc("GET /api/chirps", conf.getAllChirps)
+	serverMux.HandleFunc("GET /api/chirps/{chirpID}", conf.getChirp)
 
 	// fileserver
 	handler := http.FileServer(http.Dir("."))
@@ -209,3 +212,114 @@ func (conf *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+func (conf *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body 	string 		`json:"body"`
+		UserId 	uuid.UUID	`json:"user_id"`
+	}
+	type returnVals struct {
+		ID 			uuid.UUID 	`json:"id"`
+		CreatedAt 	time.Time 	`json:"created_at"`
+		UpdatedAt 	time.Time 	`json:"updated_at"`
+		Body 		string 		`json:"body"`
+		UserId 		uuid.UUID 	`json:"user_id"`
+	}
+	
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong 1")
+	}
+	if len(params.Body) > 140 {
+		respondWithError(w, 400, "Chirp is too long")
+	}
+
+	chirp, err := conf.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{Body: params.Body, UserID: params.UserId})
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("%s", err))	
+	}
+	
+	payload := returnVals{chirp.ID, chirp.CreatedAt, chirp.UpdatedAt, chirp.Body, chirp.UserID}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong 3")
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(data)
+}
+
+func (conf *apiConfig) getAllChirps(w http.ResponseWriter, r *http. Request) {
+	type parameters struct {
+		ID 			uuid.UUID 	`json:"id"`
+		CreatedAt 	time.Time 	`json:"created_at"`
+		UpdatedAt 	time.Time 	`json:"updated_at"`
+		Body 		string 		`json:"body"`
+		UserId 		uuid.UUID 	`json:"user_id"`
+	}
+
+	chirps, err := conf.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	payload := []parameters{}
+	for i := range(chirps) {
+		payload = append(payload, 
+			parameters{
+				ID: chirps[i].ID,
+				CreatedAt: chirps[i].CreatedAt,
+				UpdatedAt: chirps[i].UpdatedAt,
+				Body: chirps[i].Body,
+				UserId: chirps[i].UserID,
+			},
+		)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+	} 
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(data)
+}
+
+func (conf *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		ID 			uuid.UUID 	`json:"id"`
+		CreatedAt 	time.Time 	`json:"created_at"`
+		UpdatedAt 	time.Time 	`json:"updated_at"`
+		Body 		string 		`json:"body"`
+		UserId 		uuid.UUID 	`json:"user_id"`
+	}
+
+	id := r.PathValue("chirpID")
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	chirp, err := conf.dbQueries.GetChirp(r.Context(), parsedID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	
+	payload := parameters{
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body: chirp.Body,
+		UserId: chirp.UserID,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		respondWithError(w, 500, ":Something went wrong 2")
+		return
+	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(data)
+}
