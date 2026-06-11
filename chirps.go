@@ -1,14 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"slices"
-	"github.com/google/uuid"
+	"strings"
 	"time"
-	"encoding/json"
 
+	"github.com/google/uuid"
+
+	"github.com/Gosewinckel/Chirpy/internal/auth"
 	"github.com/Gosewinckel/Chirpy/internal/database"
 )
 
@@ -36,7 +38,6 @@ func cleanOutput(s string) string {
 func (conf *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body 	string 		`json:"body"`
-		UserId 	uuid.UUID	`json:"user_id"`
 	}
 	
 	decoder := json.NewDecoder(r.Body)
@@ -49,7 +50,18 @@ func (conf *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 400, "Chirp is too long")
 	}
 
-	chirp, err := conf.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanOutput(params.Body), UserID: params.UserId})
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, "Somethin went wrong")
+		return
+	}
+	user, err := auth.ValidateJWT(token, conf.secret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	chirp, err := conf.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanOutput(params.Body), UserID: user})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("%s", err))	
 	}
@@ -120,4 +132,43 @@ func (conf *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(200)
 	w.Write(data)
+}
+
+func (conf *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	head := r.Header.Get("Authorization")
+	if head == "" {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+	token := strings.TrimPrefix(head, "Bearer ")
+	identification, err := auth.ValidateJWT(token, conf.secret)
+	if err != nil {
+		respondWithError(w, 403, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("chirpID")
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	chirp, err := conf.dbQueries.GetChirp(r.Context(), parsedID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	
+	if identification != chirp.UserID {
+		respondWithError(w, 403, "Unauthorized")
+		return
+	}
+
+	err = conf.dbQueries.DeleteChirp(r.Context(), chirp.ID)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+
+	w.WriteHeader(204)
 }
