@@ -22,6 +22,7 @@ func (conf *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		Email 		string 		`json:"email"`
 		Token 		string 		`json:"token"`
 		RefreshToken string 	`json:"refresh_token"`
+		IsChirpyRed bool 		`json:"is_chirpy_red"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -57,7 +58,7 @@ func (conf *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := returnVals{user.ID, user.CreatedAt, user.UpdatedAt, user.Email, token, refreshToken}
+	payload := returnVals{user.ID, user.CreatedAt, user.UpdatedAt, user.Email, token, refreshToken, user.IsChirpyRed.Bool}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		respondWithError(w, 500, "Something went wrong")

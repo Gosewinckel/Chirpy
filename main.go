@@ -17,6 +17,7 @@ type apiConfig struct {
 	dbQueries database.Queries
 	platform string
 	secret string
+	polkaKey string
 }
 
 func main() {
@@ -25,6 +26,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 	secret := os.Getenv("SECRET")
+	polka := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		os.Exit(1)
@@ -41,6 +43,7 @@ func main() {
 	conf.dbQueries = *dbQueries
 	conf.platform = platform
 	conf.secret = secret
+	conf.polkaKey = polka
 
 	// register handlers
 	serverMux.HandleFunc("GET /api/healthz", serverHealth)
@@ -55,6 +58,7 @@ func main() {
 	serverMux.HandleFunc("POST /api/refresh", conf.refresh)
 	serverMux.HandleFunc("POST /api/revoke", conf.revoke)
 	serverMux.HandleFunc("DELETE /api/chirps/{chirpID}", conf.deleteChirp)
+	serverMux.HandleFunc("POST /api/polka/webhooks", conf.upgradeUser)
 
 	// fileserver
 	handler := http.FileServer(http.Dir("."))

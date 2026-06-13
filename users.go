@@ -14,14 +14,15 @@ import (
 
 func (conf *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email 		string `json:"email"`
-		Password 	string `json:"password"`
+		Email 		string 	`json:"email"`
+		Password 	string 	`json:"password"`
 	}	
 	type returnVals struct {
 		ID 			uuid.UUID 	`json:"id"`	
 		CreatedAt 	time.Time 	`json:"created_at"`
 		UpdatedAt	time.Time 	`json:"updated_at"`
 		Email 		string 		`json:"email"`
+		IsChirpyRed bool 		`json:"is_chirpy_red"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -45,7 +46,7 @@ func (conf *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	payload := returnVals{user.ID, user.CreatedAt, user.UpdatedAt, user.Email}
+	payload := returnVals{user.ID, user.CreatedAt, user.UpdatedAt, user.Email, user.IsChirpyRed.Bool}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("Error marshaling payload")
@@ -113,4 +114,40 @@ func (conf *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(200)
 	w.Write(data)
+}
+
+func (conf *apiConfig) upgradeUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event 	string 	`json:"event"`
+		Data struct {	
+			UserId 	uuid.UUID	`json:"user_id"`
+		}	`json:"data"`
+	}
+
+	authorized, err := auth.GetAPIKey(r.Header)
+	if authorized != conf.polkaKey {
+		respondWithError(w, 401, "")
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		respondWithError(w, 204, "")
+		return
+	}
+
+	err = conf.dbQueries.UpgradeRed(r.Context(), params.Data.UserId)
+	if err != nil {
+		respondWithError(w, 404, "Not found")
+		return
+	}
+
+	w.WriteHeader(204)
 }

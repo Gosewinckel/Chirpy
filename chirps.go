@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,11 +79,29 @@ func (conf *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (conf *apiConfig) getAllChirps(w http.ResponseWriter, r *http. Request) {
-	chirps, err := conf.dbQueries.GetAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, 500, "Something went wrong")
-		return
+	// query author
+	author := r.URL.Query().Get("author_id")
+	var chirps []database.Chirp
+	var err error
+	if author != "" {
+		authorID, err := uuid.Parse(author)
+		if err != nil {
+			respondWithError(w, 500, "Something wemt wrong")
+			return
+		}
+		chirps, err = conf.dbQueries.GetChirpByAuthor(r.Context(), authorID)
+		if err != nil {
+			respondWithError(w, 500, "Something went wrong")
+			return
+		}
+	} else {
+		chirps, err = conf.dbQueries.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, 500, "Something went wrong")
+			return
+		}
 	}
+
 	payload := []chirpVals{}
 	for i := range(chirps) {
 		payload = append(payload, 
@@ -95,6 +114,13 @@ func (conf *apiConfig) getAllChirps(w http.ResponseWriter, r *http. Request) {
 			},
 		)
 	}
+
+	// query sort
+	sortOrder := r.URL.Query().Get("sort")
+	if sortOrder == "desc" {
+		sort.Slice(payload, func(i, j int) bool {return payload[i].CreatedAt.After(payload[j].CreatedAt)})
+	}
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		respondWithError(w, 500, "Something went wrong")
